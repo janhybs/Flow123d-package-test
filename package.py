@@ -344,4 +344,6 @@ print '\n'.join(
     ['{:^100s}'.format('{:<20s} {:^10}'.format(k.upper(), str(actions_result[k]).upper())) for k in options.actions])
 print '=' * 100
 
-exit(max(results))
+
+print 'exiting with {}'.format(max(results))
+sys.exit(max(results))
