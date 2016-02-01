@@ -15,6 +15,62 @@ class Command(object):
     ECHO_SYSTEM = 'echo {system}'
 
 
+class Args(object):
+    def __init__(self, options):
+        self.server = options.server
+        self.version = options.version
+        self.platform = options.platform
+        self.x64 = options.x64
+        self.extension = None
+        self.folder, self.location = self.fix_args()
+        self.web_version = self.determine_branch()
+        self.download_url = self.determine_download_url()
+        self.actions = options.actions
+
+    def __repr__(self):
+        values = ('server', 'version', 'web_version', 'platform', 'x64')
+        _repr = []
+        for v in values:
+            _repr.append(('{name:20s} {self.' + v + ':>79s}').format(name=v, self=self))
+        _repr.append('{name:20s} {actions:>79s}'.format(name='actions', actions=', '.join(self.actions)))
+        _repr.append('{:^100s}'.format(self.download_url))
+        return '\n'.join(_repr)
+
+    @property
+    def flow_bin_location(self):
+        if self.platform == 'linux':
+            files = os.listdir(self.folder)
+            for f in files:
+                if f.lower().find('flow123d') >= 0 and os.path.isdir(os.path.join(self.folder, f)):
+                    return os.path.join(self.folder, f, 'bin', 'flow123d')
+
+        if self.platform == 'windows':
+            return os.path.join(self.folder, 'bin', 'flow123d.exe')
+        return None
+
+    def fix_args(self):
+        self.platform = self.platform or get_system_simple()
+        self.x64 = self.x64 or get_x64()
+        self.extension = self.extension or { 'linux': '.tar.gz', 'windows': '.exe' }.get(self.platform)
+        self.folder = default_kwargs['system_sigs'].get(self.platform).get(self.x64)
+        self.location = os.path.join(self.folder, self.folder + self.extension)
+        mkdirr(os.path.dirname(self.location))
+
+        return self.folder, self.location
+
+    def determine_branch(self):
+        # format origin/master
+        if self.version.find('/') != -1:
+            branch = self.version[self.version.find('/') + 1:]
+            web_folder = '0.0.{branch}'.format(branch=branch)
+            return web_folder
+        return self.version
+
+    def determine_download_url(self):
+        return "{self.server}/{self.web_version}/flow123d_{self.web_version}_{self.folder}{self.extension}".format(
+            self=self)
+
+
 def get_system_simple():
     return re.match(r'([a-zA-Z]+)', platform.system().strip().lower()).group(1)
 
@@ -56,27 +112,18 @@ default_kwargs = dict(
 )
 
 
-def fix_args(plat=None, x64=None, ext=None):
-    plat = plat or get_system_simple()
-    x64 = x64 or get_x64()
-    ext = ext or { 'linux': '.tar.gz', 'windows': '.exe' }.get(plat)
-    folder = default_kwargs['system_sigs'].get(plat).get(x64)
-    location = os.path.join(folder, folder + ext)
-    mkdirr(os.path.dirname(location))
-
-    return plat, x64, ext, folder, location
-
-
-def find_flow_bin(plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
-    if plat == 'linux':
-        files = os.listdir(folder)
+def find_flow_bin(opts):
+    """
+    :type opts: Args
+    """
+    if opts.platform == 'linux':
+        files = os.listdir(opts.folder)
         for f in files:
-            if f.lower().find('flow123d') >= 0 and os.path.isdir(os.path.join(folder, f)):
-                return os.path.join(folder, f, 'bin', 'flow123d')
+            if f.lower().find('flow123d') >= 0 and os.path.isdir(os.path.join(opts.folder, f)):
+                return os.path.join(opts.folder, f, 'bin', 'flow123d')
 
-    if plat == 'windows':
-        return os.path.join(folder, 'bin', 'flow123d.exe')
+    if opts.platform == 'windows':
+        return os.path.join(opts.folder, 'bin', 'flow123d.exe')
     return None
 
 
@@ -120,45 +167,36 @@ def check_error(process, stdout, stderr):
     return 0
 
 
-def action_download_package(server='http://flow.nti.tul.cz/packages', version='0.0.master',
-                            plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
+def action_download_package(opts):
+    """
+    :type opts: Args
+    """
 
-    fmt_object = dict(
-        server=server,
-        version=version,
-        filename=folder + ext,
-        ext=ext,
-        x64=x64,
-        plat=plat
-    )
-
-    download_url = "{server}/{version}/flow123d_{version}_{filename}".format(**fmt_object)
-    #download_url = "http://bacula.nti.tul.cz/~jan.hybs/public/public_html/Flow123d-1.8.JHy_embedded_python-Linux.tar.gz"
-
-    print 'Downloading file {file}'.format(file=download_url)
-    filename, headers = urllib.urlretrieve(download_url, location)
+    print 'Downloading file {file}'.format(file=opts.download_url)
+    filename, headers = urllib.urlretrieve(opts.download_url, opts.location)
     if not quited:
         print 'Downloaded', filename, padding(str(headers))
     return 0
 
 
-def action_install(plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
+def action_install(opts):
+    """
+    :type opts: Args
+    """
 
-    if plat == 'linux':
-        print 'Extracting: {file}'.format(file=location)
-        tar_file = tarfile.open(location, 'r:gz')
-        tar_file.extractall(folder)
+    if opts.platform == 'linux':
+        print 'Extracting: {file}'.format(file=opts.location)
+        tar_file = tarfile.open(opts.location, 'r:gz')
+        tar_file.extractall(opts.folder)
         print 'Extracting done'
         return 0
 
-    if plat == 'windows':
-        installer_location = os.path.abspath(location)
+    if opts.platform == 'windows':
+        installer_location = os.path.abspath(opts.location)
         command = [
             installer_location,
             '/S', '/NCRC',
-            '/D=' + os.path.abspath(folder)
+            '/D=' + os.path.abspath(opts.folder)
         ]
         print 'Installing...'
         process, stdout, stderr = run_command(command)
@@ -169,16 +207,17 @@ def action_install(plat=None, x64=None, ext=None, **kwargs):
         return 0
 
 
-def action_run_flow(plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
-    flow_loc = find_flow_bin(plat=None, x64=None, ext=None, **kwargs)
+def action_run_flow(opts):
+    """
+    :type opts: Args
+    """
 
     # cross-platform run
-    if not flow_loc:
+    if not opts.flow_bin_location:
         print 'Could not find flow123d binary location'
         return 1
 
-    process, stdout, stderr = run_command([flow_loc, ' --version'])
+    process, stdout, stderr = run_command([opts.flow_bin_location, ' --version'])
 
     # check output to determine success or failure
     check_error(process, stdout, stderr)
@@ -190,14 +229,15 @@ def action_run_flow(plat=None, x64=None, ext=None, **kwargs):
     return 1
 
 
-def action_python_test(plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
-    flow_loc = find_flow_bin(plat=None, x64=None, ext=None, **kwargs)
-    root = os.path.split(os.path.split(flow_loc)[0])[0]
+def action_python_test(opts):
+    """
+    :type opts: Args
+    """
+    root = os.path.split(os.path.split(opts.flow_bin_location)[0])[0]
     test_loc = os.path.join(root, 'tests', '03_transport_small_12d', 'flow_implicit.con')
     output_loc = os.path.join(root, 'output')
 
-    command = [flow_loc, '-s', test_loc, '-o', output_loc]
+    command = [opts.flow_bin_location, '-s', test_loc, '-o', output_loc]
     process, stdout, stderr = run_command(command)
     check_error(process, stdout, stderr)
     if process.returncode != 0:
@@ -212,17 +252,19 @@ def action_python_test(plat=None, x64=None, ext=None, **kwargs):
     return 0
 
 
-def action_uninstall(plat=None, x64=None, ext=None, **kwargs):
-    plat, x64, ext, folder, location = fix_args(plat, x64, ext)
+def action_uninstall(opts):
+    """
+    :type opts: Args
+    """
 
     print 'Uninstalling flow123d...'
 
-    if plat == 'linux':
+    if opts.platform == 'linux':
         # only remove install folder
         pass
 
-    if plat == 'windows':
-        uninstaller_location = os.path.abspath(os.path.join(folder, 'Uninstall.exe'))
+    if opts.platform == 'windows':
+        uninstaller_location = os.path.abspath(os.path.join(opts.folder, 'Uninstall.exe'))
         command = [uninstaller_location, '/S']
         process, stdout, stderr = run_command(command)
         check_error(process, stdout, stderr)
@@ -233,11 +275,11 @@ def action_uninstall(plat=None, x64=None, ext=None, **kwargs):
     # so exiting parent does not exit children as well
     time.sleep(5)
 
-    shutil.rmtree(os.path.abspath(folder), True)
+    shutil.rmtree(os.path.abspath(opts.folder), True)
     shutil.rmtree(os.path.abspath('output'), True)
-    if os.path.exists(folder):
+    if os.path.exists(opts.folder):
         print 'Uninstallation not successful!'
-        print os.listdir(folder)
+        print os.listdir(opts.folder)
         return 1
 
     print 'Uninstallation successful!'
@@ -246,14 +288,15 @@ def action_uninstall(plat=None, x64=None, ext=None, **kwargs):
 
 parser = OptionParser()
 parser.add_option('-m', '--mode', dest='actions', default='download,install,run,python_test,uninstall',
-                  help='Specify what should be done, subset of following (download, install, run, python_test, uninstall)')
+                  help='Specify what should be done, subset of (download, install, run, python_test, uninstall)')
 parser.add_option('-p', '--platform', dest='platform', default=None, help='Enforce platform (linux, windows, cygwin)')
 parser.add_option('-k', '--keep', dest='keep', default=True, help='Abort execution on error', action='store_false')
 parser.add_option('-a', '--arch', dest='x64', default=None, help='Enforce bit size (64 or 32)')
 parser.add_option('-s', '--server', dest='server', default='http://flow.nti.tul.cz/packages',
                   help='Specify server from which packages will be downloaded, default value is %default')
 parser.add_option('-v', '--version', dest='version', default='0.0.master',
-                  help='Specify web version identifier which will be part of download url, default value is %default')
+                  help='Specify web version identifier which will be part of download url, default value is %default. '
+                       'Can also be in format origin/master.')
 parser.add_option('-q', '--quiet', dest='quited', default=False, action="store_true", help='Supress commands output')
 options, args = parser.parse_args()
 
@@ -269,35 +312,36 @@ action_map = dict(
     uninstall=action_uninstall
 )
 
-action_args = dict(
-    server=options.server,
-    version=options.version,
-    plat=options.platform,
-    x64=options.x64,
-    ext=None
-)
+options.actions = str(options.actions).split(',')
 
-actions = str(options.actions).split(',')
-actions_result = dict(zip(actions, len(actions) * ['skipped']))
+opts = Args(options)
+print opts
+
+actions_result = dict(zip(options.actions, len(options.actions) * ['skipped']))
+results = [0]
 result = 0
-for action in actions:
+for action in options.actions:
     print '=' * 100
     print 'Performing action {action:>82}'.format(action=action.upper())
     print '-' * 100
     action_handler = action_map.get(action.strip())
     if action_handler:
-        result = action_handler(**action_args)
+        result = action_handler(opts)
     else:
         result = 0
         print 'not implemented yet'
     print 'Action {action} exited with {result}\n'.format(action=action.upper(), result=result)
     actions_result[action] = result
-
+    results.append(result)
     if result != 0 and not options.keep:
         print 'Action {action} failed, exiting script'.format(action=action.upper())
         break
 
 print '=' * 100
-print '\n'.join(['{:^100s}'.format('{:<20s} {:^10}'.format(k.upper(), str(actions_result[k]).upper())) for k in actions])
+print '{:^100s}'.format('{:<20s} {:^10}'.format('ACTION', 'RESULT'))
+print '-' * 100
+print '\n'.join(
+    ['{:^100s}'.format('{:<20s} {:^10}'.format(k.upper(), str(actions_result[k]).upper())) for k in options.actions])
 print '=' * 100
-exit(result)
+
+exit(max(results))
