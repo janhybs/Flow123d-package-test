@@ -346,4 +346,6 @@ print '=' * 100
 
 
 print 'exiting with {}'.format(max(results))
+if max(results) != 0:
+    raise Exception("non-zero exit")
 sys.exit(max(results))
