@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # author:   Jan Hybs
 
-import sys, os, platform, re, urllib, tarfile, shutil, time
+import sys, os, platform, re, tarfile, shutil, time, urllib2
 from subprocess import Popen, PIPE
 from optparse import OptionParser
 
@@ -90,6 +90,21 @@ def mkdirr(location):
         os.mkdir(folder, 0777)
 
 
+def download_file(remote, local, block_size=8192):
+    connection = urllib2.urlopen(remote)
+    file_info = connection.info()
+
+    fp = open(local, 'wb')
+    while True:
+        chunk = connection.read(block_size)
+        if not chunk: break
+        fp.write(chunk)
+
+    fp.flush()
+    fp.close()
+    return file_info
+
+
 def padding(s='', pad='\n        ', tail=10):
     if s is None or not s.strip():
         return ''
@@ -173,9 +188,14 @@ def action_download_package(opts):
     """
 
     print 'Downloading file {file}'.format(file=opts.download_url)
-    filename, headers = urllib.urlretrieve(opts.download_url, opts.location)
-    if not quited:
-        print 'Downloaded', filename, padding(str(headers))
+    try:
+        headers = download_file(remote=opts.download_url, local=opts.location)
+        if not quited:
+            print 'Downloaded {:3.1f} MB'.format(float(headers.get('Content-Length', 0))/(10**6)),
+            print padding(str(headers))
+    except urllib2.HTTPError as e:
+        print 'Download error: ', e, padding(str(e.headers))
+        return 1
     return 0
 
 
