@@ -7,6 +7,7 @@ from subprocess import Popen, PIPE
 from optparse import OptionParser
 
 quited = False
+full_output = True
 
 
 class Command(object):
@@ -20,6 +21,7 @@ class Args(object):
         self.server = options.server
         self.version = options.version
         self.platform = options.platform
+        self.release = options.release
         self.x64 = options.x64
         self.extension = None
         self.folder, self.location = self.fix_args()
@@ -28,10 +30,10 @@ class Args(object):
         self.actions = options.actions
 
     def __repr__(self):
-        values = ('server', 'version', 'web_version', 'platform', 'x64')
+        values = ('server', 'version', 'web_version', 'platform', 'x64', 'release')
         _repr = []
         for v in values:
-            _repr.append(('{name:20s} {self.' + v + ':>79s}').format(name=v, self=self))
+            _repr.append(('{name:20s} {self.' + v + ':>79}').format(name=v, self=self))
         _repr.append('{name:20s} {actions:>79s}'.format(name='actions', actions=', '.join(self.actions)))
         _repr.append('{:^100s}'.format(self.download_url))
         return '\n'.join(_repr)
@@ -108,6 +110,8 @@ def download_file(remote, local, block_size=8192):
 def padding(s='', pad='\n        ', tail=10):
     if s is None or not s.strip():
         return ''
+    if full_output:
+        tail = 1000
     lines = s.strip().splitlines()
     if len(lines) > tail:
         return pad + '...' + pad + pad.join(lines[-tail:])
@@ -253,8 +257,11 @@ def action_python_test(opts):
     """
     :type opts: Args
     """
+    if not opts.flow_bin_location:
+        print 'Could not find flow123d binary'
+        return 1
     root = os.path.split(os.path.split(opts.flow_bin_location)[0])[0]
-    test_loc = os.path.join(root, 'tests', '03_transport_small_12d', 'flow_implicit.con')
+    test_loc = os.path.join(root, 'tests', '03_transport_small_12d', 'flow_implicit.yaml')
     output_loc = os.path.join(root, 'output')
 
     command = [opts.flow_bin_location, '-s', test_loc, '-o', output_loc]
@@ -266,8 +273,13 @@ def action_python_test(opts):
     out = stderr + stdout
     match = re.match(r'.*(profiler_info_[0-9_\.-]+\.log\.json\.txt file generated).*', out.replace('\n', ' '))
     if not match:
+        print 'Execution was successful but...'
         print 'Could not find message about generating json file!'
-        return 1
+        if opts.release:
+            print 'Ignoring, since version is marked as release.'
+            return 0
+        else:
+            return 1
     print 'String "{msg}" found'.format(msg=match.group(1))
     return 0
 
@@ -311,6 +323,8 @@ parser.add_option('-m', '--mode', dest='actions', default='download,install,run,
                   help='Specify what should be done, subset of (download, install, run, python_test, uninstall)')
 parser.add_option('-p', '--platform', dest='platform', default=None, help='Enforce platform (linux, windows, cygwin)')
 parser.add_option('-k', '--keep', dest='keep', default=True, help='Abort execution on error', action='store_false')
+parser.add_option('-f', '--full', dest='full', default=True, help='Show full output', action='store_false')
+parser.add_option('-r', '--release', dest='release', default=True, help='Specify whether is given version release', action='store_false')
 parser.add_option('-a', '--arch', dest='x64', default=None, help='Enforce bit size (64 or 32)')
 parser.add_option('-s', '--server', dest='server', default='http://flow.nti.tul.cz/packages',
                   help='Specify server from which packages will be downloaded, default value is %default')
@@ -321,6 +335,7 @@ parser.add_option('-q', '--quiet', dest='quited', default=False, action="store_t
 options, args = parser.parse_args()
 
 quited = options.quited
+full_output = options.full
 action_map = dict(
     download=action_download_package,
     install=action_install,
